@@ -277,7 +277,12 @@
         <button id="tabInProgress" class="active">진행중</button>
         <button id="tabDone">완료</button>
       </div>
-      <button class="fab" id="fabAdd" title="새 업무 폴더" style="display:none;">+</button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="fab" id="fabAdd" title="새 업무 폴더" style="display:none;">+</button>
+        <button class="btn ghost" id="formsBtn" title="업무 양식" style="display:none;white-space:nowrap;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>업무 양식
+        </button>
+      </div>
       <div class="searchwrap">
         <input type="text" id="searchInput" placeholder="업체명으로 검색…">
       </div>
@@ -398,6 +403,7 @@ const CONFIG = {
   ROOT_FOLDER_NAME: '교정업무관리',
   INPROGRESS_FOLDER_NAME: '진행중',
   DONE_FOLDER_NAME: '완료',
+  FORMS_FOLDER_NAME: '업무양식',
   SPECIAL_COMPANIES_FILE: '_special_companies.json',
   TOKEN_STORAGE_KEY: 'ctm_google_token_v1',
 };
@@ -423,7 +429,7 @@ function clearTokenStorage(){
 
 let accessToken = null;
 let tokenClient = null;
-let rootFolderId = null, inProgressFolderId = null, doneFolderId = null;
+let rootFolderId = null, inProgressFolderId = null, doneFolderId = null, formsFolderId = null;
 let currentTab = 'inprogress';
 let cachedInProgress = [];   // [{id,name}]
 let cachedDoneMonths = {};   // { '2026-07': [{id,name}] }
@@ -662,6 +668,7 @@ async function ensureRootStructure(){
   rootFolderId = (await findOrCreateFolder(CONFIG.ROOT_FOLDER_NAME, null)).id;
   inProgressFolderId = (await findOrCreateFolder(CONFIG.INPROGRESS_FOLDER_NAME, rootFolderId)).id;
   doneFolderId = (await findOrCreateFolder(CONFIG.DONE_FOLDER_NAME, rootFolderId)).id;
+  formsFolderId = (await findOrCreateFolder(CONFIG.FORMS_FOLDER_NAME, rootFolderId)).id;
   document.getElementById('rootStatus').textContent =
     `연결됨 · Drive / ${CONFIG.ROOT_FOLDER_NAME}`;
 }
@@ -694,6 +701,7 @@ async function onSignedIn(){
   document.getElementById('gate').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   document.getElementById('fabAdd').style.display = 'flex';
+  document.getElementById('formsBtn').style.display = 'inline-block';
   try{
     await ensureRootStructure();
     await loadSpecialCompanies();
@@ -714,6 +722,7 @@ function showSignedOut(){
   document.getElementById('gate').style.display = 'block';
   document.getElementById('app').style.display = 'none';
   document.getElementById('fabAdd').style.display = 'none';
+  document.getElementById('formsBtn').style.display = 'none';
   document.getElementById('rootStatus').textContent = 'Google Drive 연결 대기 중…';
 }
 
@@ -909,6 +918,11 @@ document.getElementById('fabAdd').addEventListener('click', ()=>{
   newFolderOverlay.classList.add('show');
 });
 
+document.getElementById('formsBtn').addEventListener('click', ()=>{
+  if(!formsFolderId){ toast('업무 양식 폴더를 아직 불러오지 못했습니다. 잠시 후 다시 시도해주세요.', true); return; }
+  openFolderModal(formsFolderId, '업무 양식', { protectedRoot:true });
+});
+
 function getSelectedCode(){
   const select = document.getElementById('fCode');
   if(select.value === '기타'){
@@ -962,12 +976,20 @@ document.getElementById('createFolderBtn').addEventListener('click', async ()=>{
    ========================================================================= */
 const folderOverlay = document.getElementById('folderOverlay');
 
-async function openFolderModal(folderId, folderName){
+let modalRootProtected = false; // true면 최상위 폴더(예: 업무 양식)의 이름 수정/삭제를 막음
+
+async function openFolderModal(folderId, folderName, opts){
+  opts = opts || {};
+  modalRootProtected = !!opts.protectedRoot;
   activeFolder = { id: folderId, name: folderName };
   viewStack = [{ id: folderId, name: folderName }];
   exitTitleEdit();
   document.getElementById('folderModalTitle').textContent = folderName;
-  document.getElementById('folderModalMeta').textContent = '첨부파일';
+  document.getElementById('folderModalMeta').textContent = modalRootProtected
+    ? '회사 공용 업무 양식 보관함 (업로드/다운로드/삭제 가능)'
+    : '첨부파일';
+  document.getElementById('deleteFolderBtn').style.display = modalRootProtected ? 'none' : '';
+  document.getElementById('folderModalTitle').style.cursor = modalRootProtected ? 'default' : 'pointer';
   document.getElementById('fileListEl').innerHTML = `<li>불러오는 중…</li>`;
   renderBreadcrumb();
   folderOverlay.classList.add('show');
@@ -1015,7 +1037,7 @@ document.getElementById('newSubfolderBtn').addEventListener('click', async ()=>{
 
 /* --- 폴더 이름 수정 --- */
 function enterTitleEdit(){
-  if(!activeFolder) return;
+  if(!activeFolder || modalRootProtected) return;
   const h2 = document.getElementById('folderModalTitle');
   const input = document.getElementById('folderModalTitleInput');
   input.value = activeFolder.name;
@@ -1135,7 +1157,7 @@ async function downloadFolderAsZip(folderId, folderName, btnEl){
 
 /* --- 폴더 삭제 (파일 전체 포함) --- */
 document.getElementById('deleteFolderBtn').addEventListener('click', async ()=>{
-  if(!activeFolder) return;
+  if(!activeFolder || modalRootProtected) return;
   const ok = confirm(
     `"${activeFolder.name}" 폴더를 삭제하시겠습니까?\n\n` +
     `⚠️ 폴더 안의 모든 첨부파일이 함께 영구 삭제되며 복구할 수 없습니다.`
@@ -1375,6 +1397,7 @@ document.querySelectorAll('[data-close]').forEach(btn=>{
     exitTitleEdit();
     activeFolder = null;
     viewStack = [];
+    modalRootProtected = false;
   });
 });
 document.querySelectorAll('.overlay').forEach(ov=>{
@@ -1384,6 +1407,7 @@ document.querySelectorAll('.overlay').forEach(ov=>{
       exitTitleEdit();
       activeFolder = null;
       viewStack = [];
+      modalRootProtected = false;
     }
   });
 });
