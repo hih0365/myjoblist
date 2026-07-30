@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>교정 업무 관리</title>
+
+<!--
+  =========================================================================
+  ⚠️  설정이 반드시 필요합니다 (Google Cloud Console)
+  =========================================================================
+  1) https://console.cloud.google.com 접속 → 새 프로젝트 생성(또는 기존 프로젝트 선택)
+  2) 좌측 메뉴 "API 및 서비스" → "라이브러리" → "Google Drive API" 검색 → 사용 설정
+  3) "API 및 서비스" → "OAuth 동의 화면"
+       - User Type: 개인 사용이면 "외부(External)" 선택 후 테스트 사용자에 본인 구글 계정 추가
+       - 범위(Scopes) 추가 불필요 (아래 CLIENT_ID 발급 후 코드에서 요청)
+  4) "API 및 서비스" → "사용자 인증 정보" → "+ 사용자 인증 정보 만들기" → "OAuth 클라이언트 ID"
+       - 애플리케이션 유형: 웹 애플리케이션
+       - "승인된 자바스크립트 원본"에 이 파일을 실제로 열어볼 주소를 추가
+         예) https://내도메인.com  또는  http://localhost:5500  (Live Server 등으로 로컬 테스트 시)
+         ※ file:// 로 직접 여는 방식은 동작하지 않습니다. 반드시 http(s) 서버로 열어야 합니다.
+  5) 발급된 "클라이언트 ID" 값을 아래 CONFIG.CLIENT_ID 에 붙여넣기
+  =========================================================================
+-->
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<style>
+  :root{
+    --ink:#1f2937;
+    --paper:#f7f6f2;
+    --card:#ffffff;
+    --line:#dcd8cf;
+    --steel:#2c5f7c;
+    --steel-dark:#1c4054;
+    --steel-soft:#e7eef2;
+    --amber:#b98a2b;
+    --amber-soft:#faf1de;
+    --green:#2f7a4f;
+    --green-soft:#e6f3ea;
+    --red:#b0413e;
+    --mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:var(--sans); background:var(--paper); color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  /* --- ruler / tick-mark motif header --- */
+  header{
+    background:var(--steel-dark); color:#fff; padding:0;
+    position:sticky; top:0; z-index:20;
+  }
+  .header-inner{
+    max-width:1100px; margin:0 auto; padding:22px 24px 0 24px;
+    display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  }
+  header h1{
+    font-size:20px; font-weight:700; margin:0 0 4px 0; letter-spacing:0.2px;
+  }
+  header .sub{
+    font-family:var(--mono); font-size:12px; color:#a9c2cf; margin-bottom:14px;
+  }
+  .ticks{
+    height:14px; display:flex; align-items:flex-end; max-width:1100px; margin:0 auto;
+    padding:0 24px;
+  }
+  .ticks span{ flex:1; border-left:1px solid rgba(255,255,255,0.18); height:6px; }
+  .ticks span:nth-child(5n+1){ height:12px; border-left:1px solid rgba(255,255,255,0.32); }
+
+  .auth-area{ display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  #userChip{ font-size:12px; font-family:var(--mono); color:#dce9ee; display:none; }
+  button{ font-family:var(--sans); cursor:pointer; }
+
+  .btn{
+    border:none; border-radius:6px; padding:9px 16px; font-size:13px; font-weight:600;
+    background:var(--steel); color:#fff; transition:background .15s ease;
+  }
+  .btn:hover{ background:#244a61; }
+  .btn.secondary{ background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.5); }
+  .btn.secondary:hover{ background:rgba(255,255,255,0.08); }
+  .btn.ghost{ background:transparent; color:var(--steel); border:1px solid var(--line); }
+  .btn.ghost:hover{ background:var(--steel-soft); }
+  .btn.danger{ background:var(--red); }
+  .btn.danger:hover{ background:#8f322f; }
+  .btn:disabled{ opacity:0.45; cursor:not-allowed; }
+
+  main{ max-width:1100px; margin:0 auto; padding:28px 24px 80px 24px; }
+
+  .gate{
+    text-align:center; padding:100px 20px; color:#6b6558;
+  }
+  .gate h2{ color:var(--ink); font-size:22px; margin-bottom:8px; }
+
+  .toolbar{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    margin-bottom:18px; flex-wrap:wrap;
+  }
+  .tabs{ display:flex; gap:4px; background:#efece3; padding:4px; border-radius:8px; }
+  .tabs button{
+    border:none; background:transparent; padding:8px 16px; border-radius:6px; font-size:13px; font-weight:600;
+    color:#7a7568;
+  }
+  .tabs button.active{ background:var(--card); color:var(--steel-dark); box-shadow:0 1px 2px rgba(0,0,0,0.08); }
+
+  .searchwrap{ display:flex; gap:8px; flex:1; max-width:340px; }
+  .searchwrap input{
+    flex:1; padding:9px 12px; border:1px solid var(--line); border-radius:6px; font-size:13px; background:#fff;
+  }
+
+  .card-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(260px,1fr)); gap:14px;
+  }
+  .task-card{
+    background:var(--card); border:1px solid var(--line); border-radius:8px; padding:0;
+    overflow:hidden; transition:box-shadow .15s ease, transform .15s ease; position:relative;
+  }
+  .task-card:hover{ box-shadow:0 4px 14px rgba(30,40,50,0.08); transform:translateY(-1px); }
+  .task-card .datebar{
+    background:var(--steel-soft); color:var(--steel-dark); font-family:var(--mono); font-size:11px;
+    font-weight:700; letter-spacing:0.5px; padding:6px 12px; display:flex; justify-content:space-between;
+  }
+  .task-card .body{ padding:12px 14px 14px 14px; cursor:pointer; }
+  .task-card .company{ font-size:15px; font-weight:700; margin-bottom:2px; }
+  .task-card .note{ font-size:12px; color:#7a7568; min-height:16px; }
+  .task-card .footer{
+    display:flex; align-items:center; justify-content:space-between; padding:8px 14px 12px 14px;
+    border-top:1px solid #f0eee7;
+  }
+  .check-label{ display:flex; align-items:center; gap:6px; font-size:12px; color:#6b6558; cursor:pointer; }
+  .check-label input{ width:15px; height:15px; accent-color:var(--green); cursor:pointer; }
+
+  .month-group{ margin-bottom:26px; }
+  .month-group h3{
+    font-family:var(--mono); font-size:13px; color:var(--steel-dark); border-bottom:2px solid var(--steel);
+    display:inline-block; padding-bottom:4px; margin-bottom:12px;
+  }
+
+  .empty{
+    text-align:center; padding:60px 20px; color:#8f8a7c; font-size:13px;
+    border:1px dashed var(--line); border-radius:10px; background:rgba(255,255,255,0.4);
+  }
+
+  /* modal */
+  .overlay{
+    position:fixed; inset:0; background:rgba(20,25,30,0.45); display:none;
+    align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .overlay.show{ display:flex; }
+  .modal{
+    background:#fff; border-radius:10px; width:100%; max-width:560px; max-height:86vh; overflow:auto;
+    box-shadow:0 20px 60px rgba(0,0,0,0.25);
+  }
+  .modal-head{
+    padding:18px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:flex-start;
+  }
+  .modal-head h2{ font-size:16px; margin:0 0 2px 0; }
+  .modal-head .meta{ font-family:var(--mono); font-size:11px; color:#8f8a7c; }
+  .modal-body{ padding:18px 20px; }
+  .close-x{ background:none; border:none; font-size:20px; color:#9a9488; line-height:1; padding:2px 6px; }
+
+  .title-row{ display:flex; align-items:center; gap:8px; }
+  .title-row h2{ margin:0; cursor:pointer; border-bottom:1px dashed transparent; }
+  .title-row h2:hover{ border-bottom-color:#b7b2a4; }
+  .title-input{
+    font-size:16px; font-weight:700; padding:3px 8px; border:1px solid var(--steel); border-radius:5px;
+    flex:1; min-width:0; font-family:var(--sans);
+  }
+  .icon-btn{
+    background:none; border:none; padding:5px; border-radius:6px; color:#9a9488;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .icon-btn:hover{ background:var(--amber-soft); color:var(--red); }
+
+  label{ font-size:12px; font-weight:600; color:#514c3f; display:block; margin:12px 0 5px 0; }
+  label:first-child{ margin-top:0; }
+  input[type=text]{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;
+  }
+  select{
+    width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-size:13px;
+    background:#fff; font-family:var(--sans); color:var(--ink);
+  }
+  .row2{ display:grid; grid-template-columns:100px 1fr; gap:10px; }
+  .preview{
+    font-family:var(--mono); font-size:12px; background:var(--amber-soft); border:1px solid #ecdbb3;
+    padding:8px 10px; border-radius:6px; margin-top:14px; color:#7a5c15; word-break:break-all;
+  }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+
+  .file-list{ list-style:none; margin:0; padding:0; }
+  .file-list li{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 0; border-bottom:1px solid #f0eee7; font-size:13px;
+  }
+  .file-list a{ color:var(--steel-dark); text-decoration:none; }
+  .file-list a:hover{ text-decoration:underline; }
+  .file-list .fname{ display:flex; align-items:center; gap:8px; overflow:hidden; }
+  .file-list .fname svg{ flex-shrink:0; }
+  .file-list .del{ background:none; border:none; color:#b0413e; font-size:12px; padding:4px 8px; }
+  .file-list .del:hover{ text-decoration:underline; }
+
+  .upload-zone{
+    border:2px dashed var(--line); border-radius:8px; padding:18px; text-align:center; color:#8f8a7c;
+    font-size:13px; margin-top:14px; cursor:pointer; transition:border-color .15s;
+  }
+  .upload-zone.drag{ border-color:var(--steel); background:var(--steel-soft); color:var(--steel-dark); }
+  .upload-zone input{ display:none; }
+
+  .spin{
+    width:14px; height:14px; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff;
+    border-radius:50%; display:inline-block; animation:sp .7s linear infinite; vertical-align:-2px;
+  }
+  @keyframes sp{ to{ transform:rotate(360deg); } }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--ink); color:#fff; padding:11px 18px; border-radius:8px; font-size:13px;
+    z-index:100; opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px); }
+  .toast.error{ background:var(--red); }
+
+  .fab{
+    position:fixed; right:28px; bottom:28px; width:54px; height:54px; border-radius:50%;
+    background:var(--steel); color:#fff; font-size:26px; border:none; box-shadow:0 6px 20px rgba(30,40,50,0.3);
+    z-index:15;
+  }
+  .fab:hover{ background:var(--steel-dark); }
+
+  @media (max-width:520px){
+    .row2{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div>
+      <h1>교정 업무 관리</h1>
+      <div class="sub" id="rootStatus">Google Drive 연결 대기 중…</div>
+    </div>
+    <div class="auth-area">
+      <span id="userChip"></span>
+      <button class="btn secondary" id="settingsBtn" style="display:none;">업체 관리</button>
+      <button class="btn" id="signInBtn">Google 계정으로 시작</button>
+      <button class="btn secondary" id="signOutBtn" style="display:none;">로그아웃</button>
+    </div>
+  </div>
+  <div class="ticks" id="tickBar"></div>
+</header>
+
+<main>
+
+  <div id="gate" class="gate">
+    <h2>업체별 교정 업무를 폴더로 관리하세요</h2>
+    <p>폴더와 첨부파일은 본인의 Google Drive에 저장됩니다. 시작하려면 우측 상단에서 로그인하세요.</p>
+  </div>
+
+  <div id="app" style="display:none;">
+    <div class="toolbar">
+      <div class="tabs">
+        <button id="tabInProgress" class="active">진행중</button>
+        <button id="tabDone">완료</button>
+      </div>
+      <div class="searchwrap">
+        <input type="text" id="searchInput" placeholder="업체명으로 검색…">
+      </div>
+    </div>
+
+    <div id="viewInProgress"></div>
+    <div id="viewDone" style="display:none;"></div>
+  </div>
+
+  <button class="fab" id="fabAdd" title="새 업무 폴더" style="display:none;">+</button>
+
+</main>
+
+<!-- 새 폴더 생성 모달 -->
+<div class="overlay" id="newFolderOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2>새 업무 폴더</h2>
+        <div class="meta">MMDD-코드-업체명-비고</div>
+      </div>
+      <button class="close-x" data-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="row2">
+        <div>
+          <label>날짜 (MMDD)</label>
+          <input type="text" id="fDate" maxlength="4" placeholder="0730">
+        </div>
+        <div>
+          <label>코드 (**) <span style="font-weight:400;color:#a8a294;">선택</span></label>
+          <select id="fCode">
+            <option value="">선택 안함</option>
+            <option value="출장견적">출장견적</option>
+            <option value="출장교정">출장교정</option>
+            <option value="입고견적">입고견적</option>
+            <option value="입고교정">입고교정</option>
+            <option value="본관출고">본관출고</option>
+            <option value="구매품의">구매품의</option>
+            <option value="대행교정">대행교정</option>
+            <option value="기타">기타 (직접 입력)</option>
+          </select>
+          <input type="text" id="fCodeCustom" placeholder="직접 입력" style="display:none;margin-top:6px;">
+        </div>
+      </div>
+      <label>업체명</label>
+      <input type="text" id="fCompany" placeholder="예: 대한계측기">
+      <label>비고 <span style="font-weight:400;color:#a8a294;">선택</span></label>
+      <input type="text" id="fNote" placeholder="예: 압력계 3EA">
+
+      <div class="preview" id="fPreview">0730-**교정-업체명-비고</div>
+
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>취소</button>
+        <button class="btn" id="createFolderBtn">폴더 만들기</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 폴더(파일 목록) 모달 -->
+<div class="overlay" id="folderOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div style="flex:1;min-width:0;">
+        <div class="title-row">
+          <h2 id="folderModalTitle" title="클릭하여 이름 수정">폴더명</h2>
+          <input type="text" id="folderModalTitleInput" class="title-input" style="display:none;">
+          <button class="icon-btn" id="deleteFolderBtn" title="폴더 삭제">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+          </button>
+        </div>
+        <div class="meta" id="folderModalMeta"></div>
+      </div>
+      <button class="close-x" data-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <ul class="file-list" id="fileListEl"></ul>
+      <div class="upload-zone" id="uploadZone">
+        파일을 드래그하거나 클릭하여 업로드
+        <input type="file" id="fileInput" multiple>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 특정 업체명 관리 모달 -->
+<div class="overlay" id="companyOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2>특정 업체명 관리</h2>
+        <div class="meta">완료 처리 시 아래 업체명이 이름에 포함된 업무는 월별 폴더 대신 업체명 폴더로 이동합니다.</div>
+      </div>
+      <button class="close-x" data-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <input type="text" id="newCompanyInput" placeholder="업체명 입력 후 추가 (예: 남영조명상사)">
+        <button class="btn" id="addCompanyBtn" style="flex-shrink:0;">추가</button>
+      </div>
+      <ul class="file-list" id="companyListEl"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   설정
+   ========================================================================= */
+const CONFIG = {
+  CLIENT_ID: '493809666967-1a5cksgaufb38r5uivu5e3snfo1ik6ll.apps.googleusercontent.com',
+  SCOPES: 'https://www.googleapis.com/auth/drive.file',
+  ROOT_FOLDER_NAME: '교정업무관리',
+  INPROGRESS_FOLDER_NAME: '진행중',
+  DONE_FOLDER_NAME: '완료',
+  SPECIAL_COMPANIES_FILE: '_special_companies.json',
+};
+
+let accessToken = null;
+let tokenClient = null;
+let rootFolderId = null, inProgressFolderId = null, doneFolderId = null;
+let currentTab = 'inprogress';
+let cachedInProgress = [];   // [{id,name}]
+let cachedDoneMonths = {};   // { '2026-07': [{id,name}] }
+let activeFolder = null;     // { id, name } currently open in file modal
+let searchTerm = '';
+let specialCompaniesFileId = null;
+let specialCompanies = [];   // ["남영조명상사", ...] 완료 시 월별 대신 업체명 폴더로 이동
+
+/* =========================================================================
+   유틸
+   ========================================================================= */
+function toast(msg, isError){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(()=> t.classList.remove('show'), 3200);
+}
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+
+function todayMMDD(){
+  const d = new Date();
+  return pad2(d.getMonth()+1) + pad2(d.getDate());
+}
+
+function thisYearMonth(){
+  const d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth()+1);
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function buildTicks(){
+  const bar = document.getElementById('tickBar');
+  bar.innerHTML = '';
+  for(let i=0;i<60;i++){ bar.appendChild(document.createElement('span')); }
+}
+buildTicks();
+
+/* =========================================================================
+   Drive API 헬퍼 (fetch 기반, gapi 라이브러리 미사용)
+   ========================================================================= */
+async function driveFetch(path, options={}){
+  if(!accessToken) throw new Error('로그인이 필요합니다.');
+  const isFullUrl = path.startsWith('http');
+  const url = isFullUrl ? path : `https://www.googleapis.com/drive/v3/${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      ...(options.headers||{})
+    }
+  });
+  if(res.status === 401){
+    accessToken = null;
+    toast('로그인이 만료되었습니다. 다시 로그인해주세요.', true);
+    showSignedOut();
+    throw new Error('토큰 만료');
+  }
+  if(!res.ok){
+    const errText = await res.text();
+    throw new Error(`Drive API 오류 (${res.status}): ${errText}`);
+  }
+  if(res.status === 204) return null;
+  return res.json();
+}
+
+async function findFolder(name, parentId){
+  const q = encodeURIComponent(
+    `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false` +
+    (parentId ? ` and '${parentId}' in parents` : '')
+  );
+  const data = await driveFetch(`files?q=${q}&fields=files(id,name)`);
+  return data.files && data.files.length ? data.files[0] : null;
+}
+
+async function createFolder(name, parentId){
+  const body = {
+    name,
+    mimeType: 'application/vnd.google-apps.folder',
+    parents: parentId ? [parentId] : undefined
+  };
+  return driveFetch('files?fields=id,name', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+}
+
+async function findOrCreateFolder(name, parentId){
+  const existing = await findFolder(name, parentId);
+  if(existing) return existing;
+  return createFolder(name, parentId);
+}
+
+async function listChildFolders(parentId){
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const data = await driveFetch(`files?q=${q}&fields=files(id,name,createdTime)&orderBy=name desc&pageSize=1000`);
+  return data.files || [];
+}
+
+async function listFilesIn(parentId){
+  const q = encodeURIComponent(
+    `'${parentId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`
+  );
+  const data = await driveFetch(`files?q=${q}&fields=files(id,name,webViewLink,iconLink,size)&orderBy=name`);
+  return data.files || [];
+}
+
+async function uploadFileToFolder(folderId, file){
+  const metadata = { name: file.name, parents:[folderId] };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+  form.append('file', file);
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
+    method:'POST',
+    headers:{ 'Authorization': `Bearer ${accessToken}` },
+    body: form
+  });
+  if(!res.ok){ throw new Error(await res.text()); }
+  return res.json();
+}
+
+async function deleteFile(fileId){
+  await driveFetch(`files/${fileId}`, { method:'DELETE' });
+}
+
+async function moveFolder(folderId, fromParent, toParent){
+  await driveFetch(`files/${folderId}?addParents=${toParent}&removeParents=${fromParent}&fields=id,parents`, {
+    method:'PATCH'
+  });
+}
+
+/* =========================================================================
+   초기 폴더 구조 확보
+   ========================================================================= */
+async function findFileByName(name, parentId){
+  const q = encodeURIComponent(
+    `name = '${name.replace(/'/g, "\\'")}' and mimeType != 'application/vnd.google-apps.folder' and trashed = false` +
+    (parentId ? ` and '${parentId}' in parents` : '')
+  );
+  const data = await driveFetch(`files?q=${q}&fields=files(id,name)`);
+  return data.files && data.files.length ? data.files[0] : null;
+}
+
+async function createJsonFile(name, parentId, dataObj){
+  const metadata = { name, parents:[parentId], mimeType:'application/json' };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+  form.append('file', new Blob([JSON.stringify(dataObj)], {type:'application/json'}));
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
+    method:'POST',
+    headers:{ 'Authorization': `Bearer ${accessToken}` },
+    body: form
+  });
+  if(!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function readJsonFileContent(fileId){
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers:{ 'Authorization': `Bearer ${accessToken}` }
+  });
+  if(!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  try{ return JSON.parse(text); }catch(e){ return []; }
+}
+
+async function writeJsonFileContent(fileId, dataObj){
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+    method:'PATCH',
+    headers:{ 'Authorization': `Bearer ${accessToken}`, 'Content-Type':'application/json' },
+    body: JSON.stringify(dataObj)
+  });
+  if(!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+async function loadSpecialCompanies(){
+  const found = await findFileByName(CONFIG.SPECIAL_COMPANIES_FILE, rootFolderId);
+  if(found){
+    specialCompaniesFileId = found.id;
+    try{
+      specialCompanies = await readJsonFileContent(found.id);
+      if(!Array.isArray(specialCompanies)) specialCompanies = [];
+    }catch(e){ specialCompanies = []; }
+  }else{
+    const created = await createJsonFile(CONFIG.SPECIAL_COMPANIES_FILE, rootFolderId, []);
+    specialCompaniesFileId = created.id;
+    specialCompanies = [];
+  }
+}
+
+async function saveSpecialCompanies(){
+  await writeJsonFileContent(specialCompaniesFileId, specialCompanies);
+}
+
+function findMatchedSpecialCompany(folderName){
+  return specialCompanies.find(c => folderName.includes(c)) || null;
+}
+
+async function ensureRootStructure(){
+
+  document.getElementById('rootStatus').textContent = 'Drive 폴더 구조 확인 중…';
+  rootFolderId = (await findOrCreateFolder(CONFIG.ROOT_FOLDER_NAME, null)).id;
+  inProgressFolderId = (await findOrCreateFolder(CONFIG.INPROGRESS_FOLDER_NAME, rootFolderId)).id;
+  doneFolderId = (await findOrCreateFolder(CONFIG.DONE_FOLDER_NAME, rootFolderId)).id;
+  document.getElementById('rootStatus').textContent =
+    `연결됨 · Drive / ${CONFIG.ROOT_FOLDER_NAME}`;
+}
+
+/* =========================================================================
+   인증
+   ========================================================================= */
+function initAuth(){
+  if(CONFIG.CLIENT_ID.startsWith('YOUR_CLIENT_ID')){
+    toast('CONFIG.CLIENT_ID를 먼저 설정해주세요 (코드 상단 주석 참고).', true);
+  }
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: CONFIG.SCOPES,
+    callback: async (resp)=>{
+      if(resp.error){ toast('로그인에 실패했습니다: ' + resp.error, true); return; }
+      accessToken = resp.access_token;
+      await onSignedIn();
+    }
+  });
+}
+
+async function onSignedIn(){
+  document.getElementById('signInBtn').style.display = 'none';
+  document.getElementById('signOutBtn').style.display = 'inline-block';
+  document.getElementById('settingsBtn').style.display = 'inline-block';
+  document.getElementById('userChip').style.display = 'inline';
+  document.getElementById('userChip').textContent = '연결됨';
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('fabAdd').style.display = 'flex';
+  try{
+    await ensureRootStructure();
+    await loadSpecialCompanies();
+    await refreshInProgress();
+    await refreshDone();
+  }catch(e){
+    console.error(e);
+    toast('Drive 폴더 구조를 불러오지 못했습니다: ' + e.message, true);
+  }
+}
+
+function showSignedOut(){
+  accessToken = null;
+  document.getElementById('signInBtn').style.display = 'inline-block';
+  document.getElementById('signOutBtn').style.display = 'none';
+  document.getElementById('settingsBtn').style.display = 'none';
+  document.getElementById('userChip').style.display = 'none';
+  document.getElementById('gate').style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('fabAdd').style.display = 'none';
+  document.getElementById('rootStatus').textContent = 'Google Drive 연결 대기 중…';
+}
+
+document.getElementById('signInBtn').addEventListener('click', ()=>{
+  tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+});
+document.getElementById('signOutBtn').addEventListener('click', ()=>{
+  if(accessToken){
+    google.accounts.oauth2.revoke(accessToken, ()=>{});
+  }
+  showSignedOut();
+});
+
+/* =========================================================================
+   목록 렌더링 — 진행중
+   ========================================================================= */
+async function refreshInProgress(){
+  cachedInProgress = await listChildFolders(inProgressFolderId);
+  renderInProgress();
+}
+
+function parseFolderName(name){
+  // MMDD-**교정-업체명-비고  형태 파싱 (표시용, 실패해도 원본 표시)
+  const parts = name.split('-');
+  return {
+    date: parts[0] || '',
+    rest: parts.slice(1).join('-')
+  };
+}
+
+function renderInProgress(){
+  const el = document.getElementById('viewInProgress');
+  const filtered = cachedInProgress.filter(f =>
+    !searchTerm || f.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  if(filtered.length === 0){
+    el.innerHTML = `<div class="empty">진행중인 업무 폴더가 없습니다. 우측 하단 + 버튼으로 새 폴더를 만들어보세요.</div>`;
+    return;
+  }
+  el.innerHTML = `<div class="card-grid">` + filtered.map(f=>{
+    const p = parseFolderName(f.name);
+    return `
+      <div class="task-card" data-id="${f.id}">
+        <div class="datebar"><span>${escapeHtml(p.date)}</span><span>진행중</span></div>
+        <div class="body" data-open="${f.id}" data-name="${escapeHtml(f.name)}">
+          <div class="company">${escapeHtml(p.rest || f.name)}</div>
+        </div>
+        <div class="footer">
+          <label class="check-label">
+            <input type="checkbox" data-complete="${f.id}" data-fname="${escapeHtml(f.name)}">
+            완료
+          </label>
+          <button class="btn ghost" style="padding:5px 10px;font-size:11px;" data-open="${f.id}" data-name="${escapeHtml(f.name)}">열기</button>
+        </div>
+      </div>
+    `;
+  }).join('') + `</div>`;
+
+  el.querySelectorAll('[data-open]').forEach(node=>{
+    node.addEventListener('click', ()=> openFolderModal(node.dataset.open, node.dataset.name));
+  });
+  el.querySelectorAll('[data-complete]').forEach(cb=>{
+    cb.addEventListener('change', (e)=> handleComplete(e.target.dataset.complete, e.target.dataset.fname, e.target));
+  });
+}
+
+async function handleComplete(folderId, folderName, checkboxEl){
+  if(!confirm(`"${folderName}" 폴더를 완료 처리하시겠습니까?`)){
+    checkboxEl.checked = false;
+    return;
+  }
+  checkboxEl.disabled = true;
+  try{
+    const matched = findMatchedSpecialCompany(folderName);
+    let targetFolder, label;
+    if(matched){
+      targetFolder = await findOrCreateFolder(matched, doneFolderId);
+      label = matched;
+    }else{
+      const ym = thisYearMonth();
+      targetFolder = await findOrCreateFolder(ym, doneFolderId);
+      label = ym;
+    }
+    await moveFolder(folderId, inProgressFolderId, targetFolder.id);
+    toast(`완료 처리했습니다 → 완료 / ${label}`);
+    await refreshInProgress();
+    await refreshDone();
+  }catch(e){
+    console.error(e);
+    toast('완료 처리 중 오류: ' + e.message, true);
+    checkboxEl.checked = false;
+    checkboxEl.disabled = false;
+  }
+}
+
+/* =========================================================================
+   목록 렌더링 — 완료 (월별)
+   ========================================================================= */
+async function refreshDone(){
+  const months = await listChildFolders(doneFolderId); // month folders, e.g. 2026-07
+  months.sort((a,b)=> b.name.localeCompare(a.name));
+  cachedDoneMonths = {};
+  for(const m of months){
+    cachedDoneMonths[m.name] = { id:m.id, items: await listChildFolders(m.id) };
+  }
+  renderDone();
+}
+
+function renderDone(){
+  const el = document.getElementById('viewDone');
+  const monthKeys = Object.keys(cachedDoneMonths);
+  if(monthKeys.length === 0){
+    el.innerHTML = `<div class="empty">완료된 업무가 아직 없습니다.</div>`;
+    return;
+  }
+  let html = '';
+  for(const ym of monthKeys){
+    const group = cachedDoneMonths[ym];
+    const items = group.items.filter(f => !searchTerm || f.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    if(items.length === 0) continue;
+    html += `<div class="month-group"><h3>${ym}</h3><div class="card-grid">` + items.map(f=>{
+      const p = parseFolderName(f.name);
+      return `
+        <div class="task-card">
+          <div class="datebar"><span>${escapeHtml(p.date)}</span><span>완료</span></div>
+          <div class="body" data-open="${f.id}" data-name="${escapeHtml(f.name)}">
+            <div class="company">${escapeHtml(p.rest || f.name)}</div>
+          </div>
+          <div class="footer">
+            <button class="btn ghost" style="padding:5px 10px;font-size:11px;" data-restore="${f.id}" data-month="${group.id}">진행중으로 복원</button>
+            <button class="btn ghost" style="padding:5px 10px;font-size:11px;" data-open="${f.id}" data-name="${escapeHtml(f.name)}">열기</button>
+          </div>
+        </div>
+      `;
+    }).join('') + `</div></div>`;
+  }
+  el.innerHTML = html || `<div class="empty">검색 결과가 없습니다.</div>`;
+
+  el.querySelectorAll('[data-open]').forEach(node=>{
+    node.addEventListener('click', ()=> openFolderModal(node.dataset.open, node.dataset.name));
+  });
+  el.querySelectorAll('[data-restore]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      if(!confirm('이 업무를 다시 "진행중" 목록으로 되돌릴까요?')) return;
+      try{
+        await moveFolder(btn.dataset.restore, btn.dataset.month, inProgressFolderId);
+        toast('진행중 목록으로 복원했습니다.');
+        await refreshInProgress();
+        await refreshDone();
+      }catch(e){
+        toast('복원 중 오류: ' + e.message, true);
+      }
+    });
+  });
+}
+
+/* =========================================================================
+   탭 / 검색
+   ========================================================================= */
+document.getElementById('tabInProgress').addEventListener('click', ()=>{
+  currentTab = 'inprogress';
+  document.getElementById('tabInProgress').classList.add('active');
+  document.getElementById('tabDone').classList.remove('active');
+  document.getElementById('viewInProgress').style.display = 'block';
+  document.getElementById('viewDone').style.display = 'none';
+});
+document.getElementById('tabDone').addEventListener('click', ()=>{
+  currentTab = 'done';
+  document.getElementById('tabDone').classList.add('active');
+  document.getElementById('tabInProgress').classList.remove('active');
+  document.getElementById('viewDone').style.display = 'block';
+  document.getElementById('viewInProgress').style.display = 'none';
+});
+document.getElementById('searchInput').addEventListener('input', (e)=>{
+  searchTerm = e.target.value.trim();
+  renderInProgress();
+  renderDone();
+});
+
+/* =========================================================================
+   새 폴더 생성 모달
+   ========================================================================= */
+const newFolderOverlay = document.getElementById('newFolderOverlay');
+document.getElementById('fabAdd').addEventListener('click', ()=>{
+  document.getElementById('fDate').value = todayMMDD();
+  document.getElementById('fCode').value = '';
+  document.getElementById('fCodeCustom').value = '';
+  document.getElementById('fCodeCustom').style.display = 'none';
+  document.getElementById('fCompany').value = '';
+  document.getElementById('fNote').value = '';
+  updatePreview();
+  newFolderOverlay.classList.add('show');
+});
+
+function getSelectedCode(){
+  const select = document.getElementById('fCode');
+  if(select.value === '기타'){
+    return document.getElementById('fCodeCustom').value.trim();
+  }
+  return select.value;
+}
+
+document.getElementById('fCode').addEventListener('change', ()=>{
+  const isOther = document.getElementById('fCode').value === '기타';
+  const customInput = document.getElementById('fCodeCustom');
+  customInput.style.display = isOther ? 'block' : 'none';
+  if(isOther){ customInput.focus(); } else { customInput.value = ''; }
+  updatePreview();
+});
+
+function updatePreview(){
+  const date = document.getElementById('fDate').value.trim() || 'MMDD';
+  const code = getSelectedCode();
+  const company = document.getElementById('fCompany').value.trim() || '업체명';
+  const note = document.getElementById('fNote').value.trim();
+  let name = code ? `${date}-${code}-${company}` : `${date}-${company}`;
+  if(note) name += `-${note}`;
+  document.getElementById('fPreview').textContent = name;
+  return name;
+}
+['fDate','fCompany','fNote','fCodeCustom'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', updatePreview);
+});
+
+document.getElementById('createFolderBtn').addEventListener('click', async ()=>{
+  const company = document.getElementById('fCompany').value.trim();
+  if(!company){ toast('업체명을 입력해주세요.', true); return; }
+  const name = updatePreview();
+  const btn = document.getElementById('createFolderBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spin"></span> 생성 중…';
+  try{
+    await createFolder(name, inProgressFolderId);
+    toast('새 업무 폴더를 만들었습니다.');
+    newFolderOverlay.classList.remove('show');
+    await refreshInProgress();
+  }catch(e){
+    toast('폴더 생성 중 오류: ' + e.message, true);
+  }finally{
+    btn.disabled = false; btn.textContent = '폴더 만들기';
+  }
+});
+
+/* =========================================================================
+   폴더(파일) 모달
+   ========================================================================= */
+const folderOverlay = document.getElementById('folderOverlay');
+
+async function openFolderModal(folderId, folderName){
+  activeFolder = { id: folderId, name: folderName };
+  exitTitleEdit();
+  document.getElementById('folderModalTitle').textContent = folderName;
+  document.getElementById('folderModalMeta').textContent = '첨부파일';
+  document.getElementById('fileListEl').innerHTML = `<li>불러오는 중…</li>`;
+  folderOverlay.classList.add('show');
+  await refreshFileList();
+}
+
+/* --- 폴더 이름 수정 --- */
+function enterTitleEdit(){
+  if(!activeFolder) return;
+  const h2 = document.getElementById('folderModalTitle');
+  const input = document.getElementById('folderModalTitleInput');
+  input.value = activeFolder.name;
+  h2.style.display = 'none';
+  input.style.display = 'block';
+  input.focus();
+  input.select();
+}
+function exitTitleEdit(){
+  document.getElementById('folderModalTitle').style.display = '';
+  document.getElementById('folderModalTitleInput').style.display = 'none';
+}
+async function renameActiveFolder(rawName){
+  if(!activeFolder) return;
+  const newName = rawName.trim();
+  if(!newName || newName === activeFolder.name){
+    exitTitleEdit();
+    return;
+  }
+  const input = document.getElementById('folderModalTitleInput');
+  input.disabled = true;
+  try{
+    await driveFetch(`files/${activeFolder.id}?fields=id,name`, {
+      method:'PATCH',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name:newName })
+    });
+    activeFolder.name = newName;
+    document.getElementById('folderModalTitle').textContent = newName;
+    toast('폴더 이름을 변경했습니다.');
+    exitTitleEdit();
+    await refreshInProgress();
+    await refreshDone();
+  }catch(e){
+    toast('이름 변경 중 오류: ' + e.message, true);
+    exitTitleEdit();
+  }finally{
+    input.disabled = false;
+  }
+}
+document.getElementById('folderModalTitle').addEventListener('click', enterTitleEdit);
+const folderTitleInput = document.getElementById('folderModalTitleInput');
+folderTitleInput.addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){ e.preventDefault(); renameActiveFolder(folderTitleInput.value); }
+  else if(e.key === 'Escape'){ e.preventDefault(); exitTitleEdit(); }
+});
+folderTitleInput.addEventListener('blur', ()=> renameActiveFolder(folderTitleInput.value));
+
+/* --- 폴더 삭제 (파일 전체 포함) --- */
+document.getElementById('deleteFolderBtn').addEventListener('click', async ()=>{
+  if(!activeFolder) return;
+  const ok = confirm(
+    `"${activeFolder.name}" 폴더를 삭제하시겠습니까?\n\n` +
+    `⚠️ 폴더 안의 모든 첨부파일이 함께 영구 삭제되며 복구할 수 없습니다.`
+  );
+  if(!ok) return;
+  const btn = document.getElementById('deleteFolderBtn');
+  btn.disabled = true;
+  try{
+    await driveFetch(`files/${activeFolder.id}`, { method:'DELETE' });
+    toast('폴더를 삭제했습니다.');
+    folderOverlay.classList.remove('show');
+    activeFolder = null;
+    await refreshInProgress();
+    await refreshDone();
+  }catch(e){
+    toast('삭제 중 오류: ' + e.message, true);
+  }finally{
+    btn.disabled = false;
+  }
+});
+
+async function refreshFileList(){
+  if(!activeFolder) return;
+  try{
+    const files = await listFilesIn(activeFolder.id);
+    const el = document.getElementById('fileListEl');
+    if(files.length === 0){
+      el.innerHTML = `<li style="color:#8f8a7c;">아직 첨부된 파일이 없습니다.</li>`;
+      return;
+    }
+    el.innerHTML = files.map(f=>`
+      <li data-fid="${f.id}">
+        <span class="fname">
+          <img src="${f.iconLink||''}" width="16" height="16" alt="">
+          <a href="${f.webViewLink}" target="_blank" rel="noopener">${escapeHtml(f.name)}</a>
+        </span>
+        <button class="del" data-delid="${f.id}" data-delname="${escapeHtml(f.name)}">삭제</button>
+      </li>
+    `).join('');
+    el.querySelectorAll('[data-delid]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        if(!confirm(`"${btn.dataset.delname}" 파일을 삭제할까요?`)) return;
+        try{
+          await deleteFile(btn.dataset.delid);
+          toast('파일을 삭제했습니다.');
+          await refreshFileList();
+        }catch(e){
+          toast('삭제 중 오류: ' + e.message, true);
+        }
+      });
+    });
+  }catch(e){
+    document.getElementById('fileListEl').innerHTML = `<li style="color:#b0413e;">목록을 불러오지 못했습니다.</li>`;
+  }
+}
+
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+uploadZone.addEventListener('click', ()=> fileInput.click());
+uploadZone.addEventListener('dragover', (e)=>{ e.preventDefault(); uploadZone.classList.add('drag'); });
+uploadZone.addEventListener('dragleave', ()=> uploadZone.classList.remove('drag'));
+uploadZone.addEventListener('drop', (e)=>{
+  e.preventDefault(); uploadZone.classList.remove('drag');
+  handleUploadFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', ()=> handleUploadFiles(fileInput.files));
+
+async function handleUploadFiles(fileList){
+  if(!activeFolder || !fileList || fileList.length === 0) return;
+  uploadZone.textContent = '업로드 중…';
+  try{
+    for(const file of fileList){
+      await uploadFileToFolder(activeFolder.id, file);
+    }
+    toast(`${fileList.length}개 파일을 업로드했습니다.`);
+    await refreshFileList();
+  }catch(e){
+    toast('업로드 중 오류: ' + e.message, true);
+  }finally{
+    uploadZone.textContent = '파일을 드래그하거나 클릭하여 업로드';
+    fileInput.value = '';
+  }
+}
+
+/* =========================================================================
+   모달 닫기 공통
+   ========================================================================= */
+document.querySelectorAll('[data-close]').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    newFolderOverlay.classList.remove('show');
+    folderOverlay.classList.remove('show');
+    exitTitleEdit();
+    activeFolder = null;
+  });
+});
+document.querySelectorAll('.overlay').forEach(ov=>{
+  ov.addEventListener('click', (e)=>{
+    if(e.target === ov){
+      ov.classList.remove('show');
+      exitTitleEdit();
+      activeFolder = null;
+    }
+  });
+});
+
+/* =========================================================================
+   특정 업체명 관리 모달
+   ========================================================================= */
+const companyOverlay = document.getElementById('companyOverlay');
+document.getElementById('settingsBtn').addEventListener('click', ()=>{
+  renderCompanyList();
+  companyOverlay.classList.add('show');
+});
+
+function renderCompanyList(){
+  const el = document.getElementById('companyListEl');
+  if(specialCompanies.length === 0){
+    el.innerHTML = `<li style="color:#8f8a7c;">등록된 업체명이 없습니다. 등록하지 않은 업체는 완료 시 월별 폴더로 이동합니다.</li>`;
+    return;
+  }
+  el.innerHTML = specialCompanies.map((c,i)=>`
+    <li>
+      <span class="fname">${escapeHtml(c)}</span>
+      <button class="del" data-removeidx="${i}">삭제</button>
+    </li>
+  `).join('');
+  el.querySelectorAll('[data-removeidx]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const idx = parseInt(btn.dataset.removeidx, 10);
+      const removed = specialCompanies[idx];
+      const prev = specialCompanies.slice();
+      specialCompanies.splice(idx, 1);
+      renderCompanyList();
+      try{
+        await saveSpecialCompanies();
+        toast(`"${removed}" 업체명을 삭제했습니다.`);
+      }catch(e){
+        specialCompanies = prev;
+        renderCompanyList();
+        toast('삭제 중 오류: ' + e.message, true);
+      }
+    });
+  });
+}
+
+document.getElementById('addCompanyBtn').addEventListener('click', async ()=>{
+  const input = document.getElementById('newCompanyInput');
+  const name = input.value.trim();
+  if(!name){ toast('업체명을 입력해주세요.', true); return; }
+  if(specialCompanies.includes(name)){ toast('이미 등록된 업체명입니다.', true); return; }
+  const btn = document.getElementById('addCompanyBtn');
+  btn.disabled = true;
+  try{
+    specialCompanies.push(name);
+    await saveSpecialCompanies();
+    input.value = '';
+    renderCompanyList();
+    toast(`"${name}"을(를) 등록했습니다.`);
+  }catch(e){
+    specialCompanies.pop();
+    toast('등록 중 오류: ' + e.message, true);
+  }finally{
+    btn.disabled = false;
+  }
+});
+document.getElementById('newCompanyInput').addEventListener('keydown', (e)=>{
+  if(e.key === 'Enter'){ e.preventDefault(); document.getElementById('addCompanyBtn').click(); }
+});
+
+
+window.addEventListener('load', ()=>{
+  // GIS 스크립트 로드를 약간 기다린 뒤 초기화
+  const wait = setInterval(()=>{
+    if(window.google && google.accounts && google.accounts.oauth2){
+      clearInterval(wait);
+      initAuth();
+    }
+  }, 100);
+});
+</script>
+</body>
+</html>
