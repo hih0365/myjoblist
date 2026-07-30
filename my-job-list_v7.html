@@ -536,7 +536,7 @@ async function listFilesIn(parentId){
   const q = encodeURIComponent(
     `'${parentId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed = false`
   );
-  const data = await driveFetch(`files?q=${q}&fields=files(id,name,webViewLink,iconLink,size,mimeType)&orderBy=name`);
+  const data = await driveFetch(`files?q=${q}&fields=files(id,name,webViewLink,webContentLink,iconLink,size,mimeType)&orderBy=name`);
   return data.files || [];
 }
 
@@ -1188,7 +1188,7 @@ async function refreshFileList(){
       <li data-fid="${f.id}">
         <span class="fname">
           <img src="${f.iconLink||''}" width="16" height="16" alt="">
-          <a href="https://drive.google.com/file/d/${f.id}/preview" target="_blank" rel="noopener">${escapeHtml(f.name)}</a>
+          <a href="${f.webContentLink || `https://drive.google.com/uc?id=${f.id}&export=download`}" target="_blank" rel="noopener">${escapeHtml(f.name)}</a>
         </span>
         <button class="del" data-delid="${f.id}" data-delname="${escapeHtml(f.name)}">삭제</button>
       </li>
