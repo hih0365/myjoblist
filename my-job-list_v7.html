@@ -344,9 +344,6 @@
         <div class="title-row">
           <h2 id="folderModalTitle" title="클릭하여 이름 수정">폴더명</h2>
           <input type="text" id="folderModalTitleInput" class="title-input" style="display:none;">
-          <button class="icon-btn download" id="downloadFolderBtn" title="폴더 전체 다운로드 (zip)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          </button>
           <button class="icon-btn" id="deleteFolderBtn" title="폴더 삭제">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
           </button>
@@ -1098,14 +1095,12 @@ async function fetchEntryBlob(entry){
   return { blob: await res.blob(), path: entry.path };
 }
 
-document.getElementById('downloadFolderBtn').addEventListener('click', async ()=>{
-  if(!activeFolder) return;
-  const btn = document.getElementById('downloadFolderBtn');
-  const originalHTML = btn.innerHTML;
-  btn.disabled = true;
+async function downloadFolderAsZip(folderId, folderName, btnEl){
+  const originalHTML = btnEl.innerHTML;
+  btnEl.disabled = true;
   try{
     toast('파일 목록을 확인하는 중…');
-    const entries = await collectAllFilesRecursive(activeFolder.id);
+    const entries = await collectAllFilesRecursive(folderId);
     if(entries.length === 0){
       toast('다운로드할 파일이 없습니다.', true);
       return;
@@ -1113,7 +1108,7 @@ document.getElementById('downloadFolderBtn').addEventListener('click', async ()=
     const zip = new JSZip();
     let done = 0;
     for(const entry of entries){
-      btn.innerHTML = `<span class="spin"></span>`;
+      btnEl.innerHTML = `<span class="spin"></span>`;
       toast(`압축 준비 중… (${done}/${entries.length})`);
       const { blob, path } = await fetchEntryBlob(entry);
       zip.file(path, blob);
@@ -1124,7 +1119,7 @@ document.getElementById('downloadFolderBtn').addEventListener('click', async ()=
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${activeFolder.name}.zip`;
+    a.download = `${folderName}.zip`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1133,10 +1128,10 @@ document.getElementById('downloadFolderBtn').addEventListener('click', async ()=
   }catch(e){
     toast('다운로드 중 오류: ' + e.message, true);
   }finally{
-    btn.disabled = false;
-    btn.innerHTML = originalHTML;
+    btnEl.disabled = false;
+    btnEl.innerHTML = originalHTML;
   }
-});
+}
 
 /* --- 폴더 삭제 (파일 전체 포함) --- */
 document.getElementById('deleteFolderBtn').addEventListener('click', async ()=>{
@@ -1181,14 +1176,19 @@ async function refreshFileList(){
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
           ${escapeHtml(f.name)}
         </span>
-        <button class="del" data-delfolder="${f.id}" data-delfoldername="${escapeHtml(f.name)}">삭제</button>
+        <span style="display:flex;align-items:center;gap:2px;">
+          <button class="icon-btn download" data-downloadfolder="${f.id}" data-downloadfoldername="${escapeHtml(f.name)}" title="이 폴더 zip으로 다운로드 (하위 폴더 포함)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          </button>
+          <button class="del" data-delfolder="${f.id}" data-delfoldername="${escapeHtml(f.name)}">삭제</button>
+        </span>
       </li>
     `).join('');
     const fileRows = files.map(f=>`
       <li data-fid="${f.id}">
         <span class="fname">
           <img src="${f.iconLink||''}" width="16" height="16" alt="">
-          <a href="${f.webViewLink}" target="_blank" rel="noopener">${escapeHtml(f.name)}</a>
+          <a href="https://drive.google.com/file/d/${f.id}/preview" target="_blank" rel="noopener">${escapeHtml(f.name)}</a>
         </span>
         <button class="del" data-delid="${f.id}" data-delname="${escapeHtml(f.name)}">삭제</button>
       </li>
@@ -1201,6 +1201,12 @@ async function refreshFileList(){
         renderBreadcrumb();
         document.getElementById('fileListEl').innerHTML = `<li>불러오는 중…</li>`;
         await refreshFileList();
+      });
+    });
+    el.querySelectorAll('[data-downloadfolder]').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        await downloadFolderAsZip(btn.dataset.downloadfolder, btn.dataset.downloadfoldername, btn);
       });
     });
     el.querySelectorAll('[data-delfolder]').forEach(btn=>{
