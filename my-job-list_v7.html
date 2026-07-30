@@ -557,6 +557,30 @@ async function uploadFileToFolder(folderId, file){
   return res.json();
 }
 
+async function updateFileMedia(fileId, file){
+  const res = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media&fields=id,name`, {
+    method:'PATCH',
+    headers:{
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': file.type || 'application/octet-stream'
+    },
+    body: file
+  });
+  if(!res.ok){ throw new Error(await res.text()); }
+  return res.json();
+}
+
+/* 같은 폴더에 동일한 이름의 파일이 있으면 내용을 교체하고, 없으면 새로 업로드 */
+async function uploadOrReplaceFile(folderId, file){
+  const existing = await findFileByName(file.name, folderId);
+  if(existing){
+    await updateFileMedia(existing.id, file);
+    return { replaced:true, name:file.name };
+  }
+  await uploadFileToFolder(folderId, file);
+  return { replaced:false, name:file.name };
+}
+
 async function deleteFile(fileId){
   await driveFetch(`files/${fileId}`, { method:'DELETE' });
 }
@@ -1231,10 +1255,15 @@ async function handleUploadFiles(fileList){
   const targetId = viewStack[viewStack.length - 1].id;
   uploadZone.textContent = '업로드 중…';
   try{
+    let replacedCount = 0, newCount = 0;
     for(const file of fileList){
-      await uploadFileToFolder(targetId, file);
+      const result = await uploadOrReplaceFile(targetId, file);
+      if(result.replaced) replacedCount++; else newCount++;
     }
-    toast(`${fileList.length}개 파일을 업로드했습니다.`);
+    const parts = [];
+    if(newCount) parts.push(`새 파일 ${newCount}개`);
+    if(replacedCount) parts.push(`같은 이름 파일 ${replacedCount}개 교체`);
+    toast(parts.join(', ') + ' 완료했습니다.');
     await refreshFileList();
   }catch(e){
     toast('업로드 중 오류: ' + e.message, true);
@@ -1311,14 +1340,18 @@ async function handleDropEntries(items){
     }
     const rootId = viewStack[viewStack.length - 1].id;
     const folderCache = new Map();
-    let done = 0;
+    let done = 0, replacedCount = 0, newCount = 0;
     for(const { path, file } of fileEntries){
       uploadZone.textContent = `업로드 중… (${done}/${fileEntries.length})`;
       const targetFolderId = await resolveDriveFolderForPath(rootId, path, folderCache);
-      await uploadFileToFolder(targetFolderId, file);
+      const result = await uploadOrReplaceFile(targetFolderId, file);
+      if(result.replaced) replacedCount++; else newCount++;
       done++;
     }
-    toast(`${fileEntries.length}개 파일을 업로드했습니다. (폴더 구조 유지)`);
+    const parts = [];
+    if(newCount) parts.push(`새 파일 ${newCount}개`);
+    if(replacedCount) parts.push(`같은 이름 파일 ${replacedCount}개 교체`);
+    toast(parts.join(', ') + ' 완료했습니다. (폴더 구조 유지)');
     await refreshFileList();
   }catch(e){
     toast('업로드 중 오류: ' + e.message, true);
